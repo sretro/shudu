@@ -103,6 +103,8 @@
     .highlight {
       animation: blink 1.5s infinite;
     }
+  <!-- 引入 seedrandom 库，用于固定随机种子 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/seedrandom/3.0.5/seedrandom.min.js"></script>
   </style>
 </head>
 <body>
@@ -136,8 +138,7 @@
   </div>
   <div id="sudoku-board"></div>
 
-  <!-- 引入 seedrandom 库，用于固定随机种子 -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/seedrandom/3.0.5/seedrandom.min.js"></script>
+
   <script>
     // 防抖函数（可选，减少频繁重绘）
     function debounce(fn, delay) {
