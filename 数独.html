@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>数独游戏小程序</title>
+  <style>
+    /* 通用样式 */
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      background: #f0f0f0;
+      margin: 0;
+      padding: 20px;
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+    }
+    #controls {
+      margin: 10px auto 20px;
+      padding: 10px;
+      background: #fff;
+      border-radius: 5px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+      max-width: 480px;
+    }
+    #controls input, #controls select {
+      padding: 5px;
+      font-size: 14px;
+    }
+    button {
+      padding: 8px 12px;
+      font-size: 14px;
+      border: none;
+      border-radius: 3px;
+      background: #4CAF50;
+      color: #fff;
+      cursor: pointer;
+      transition: background 0.3s, transform 0.3s;
+      margin: 5px;
+    }
+    button:hover {
+      background: #45a049;
+      transform: scale(1.05);
+    }
+    #sudoku-board {
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(9, 50px);
+      grid-template-rows: repeat(9, 50px);
+      border: 3px solid #333;
+      width: 450px;
+      height: 450px;
+      background: #fff;
+      border-radius: 5px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      opacity: 0;
+      animation: fadeIn 0.8s forwards;
+    }
+    @keyframes fadeIn {
+      to { opacity: 1; }
+    }
+    .cell {
+      border: 1px solid #999;
+      position: relative;
+      cursor: pointer;
+      background: #fff;
+      transition: background-color 0.3s, transform 0.3s, border 0.3s;
+    }
+    /* 每3个单元格绘制粗边框 */
+    .cell:nth-child(3n) { border-right: 3px solid #333; }
+    .cell:nth-child(n+19):nth-child(-n+27),
+    .cell:nth-child(n+46):nth-child(-n+54) { border-bottom: 3px solid #333; }
+    .cell:hover {
+      transform: scale(1.03);
+      background: #fafafa;
+    }
+    .selected { border: 2px solid blue; }
+    .confirmed {
+      font-size: 20px;
+      color: #222;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      transition: opacity 0.3s;
+    }
+    .candidates {
+      font-size: 10px;
+      color: #888;
+      position: absolute;
+      bottom: 2px;
+      right: 2px;
+      text-align: right;
+      transition: opacity 0.3s;
+    }
+    /* 高亮效果 */
+    .highlight { background-color: yellow !important; }
+    @keyframes blink {
+      0%, 100% { background-color: yellow; }
+      50% { background-color: #ffd700; }
+    }
+    .highlight {
+      animation: blink 1.5s infinite;
+    }
+  </style>
+</head>
+<body>
+  <h1>数独游戏小程序</h1>
+  <div id="controls">
+    <div>
+      输入唯一码（格式：种子-难度，例如：123456-easy，留空则随机生成）： 
+      <input type="text" id="code-input" placeholder="例如：123456-easy">
+    </div>
+    <div id="diff-select" style="margin-top:8px;">
+      难度：
+      <select id="difficulty">
+        <option value="easy">简单</option>
+        <option value="medium">中等</option>
+        <option value="hard">困难</option>
+        <option value="master">大师</option>
+      </select>
+    </div>
+    <div style="margin-top:8px;">
+      <button id="start-game">开始游戏</button>
+      <button id="toggle-mode">切换模式（当前：钢笔）</button>
+      <button id="hint-btn">提示</button>
+      <button id="generate-candidates">生成候补数</button>
+    </div>
+    <div style="margin-top:8px;">
+      计时：<span id="timer">00:00</span>
+    </div>
+    <div style="margin-top:8px;">
+      生成的唯一码：<span id="unique-code"></span>
+    </div>
+  </div>
+  <div id="sudoku-board"></div>
+
+  <!-- 引入 seedrandom 库，用于固定随机种子 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/seedrandom/3.0.5/seedrandom.min.js"></script>
+  <script>
+    // 防抖函数（可选，减少频繁重绘）
+    function debounce(fn, delay) {
+      let timer;
+      return (...args) => {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn.apply(this, args), delay);
+      };
+    }
+    const debouncedRender = debounce(renderBoard, 50);
+
+    // 全局变量
+    let board = [];       // 9x9 数独题面，空格用 0 表示
+    let solution = [];    // 数独完整解
+    let candidates = [];  // 每个格子的候补数字（数组）
+    let pencilMode = false; // false：钢笔模式，true：铅笔模式
+    let showCandidates = false; // 是否显示候补数，仅由“生成候补数”按钮控制
+    let selectedCell = null;
+    let timerInterval = null;
+    let startTime = null;
+    let highlightDigit = null; // 当前高亮的数字
+
+    // 初始化候补数字数组（初始为空）
+    function initCandidates() {
+      candidates = [];
+      for (let i = 0; i < 9; i++) {
+        let row = [];
+        for (let j = 0; j < 9; j++) {
+          row.push([]); // 初始为空，供玩家编辑
+        }
+        candidates.push(row);
+      }
+    }
+
+    // 根据当前 board 状态重新计算所有空格的候补数字（仅在点击“生成候补数”时调用）
+    function recalcAllCandidates() {
+      for (let i = 0; i < 9; i++) {
+        for (let j = 0; j < 9; j++) {
+          if (board[i][j] === 0) {
+            let used = 0;
+            // 使用位运算（简单示例）收集已用数字
+            for (let k = 0; k < 9; k++) {
+              if (board[i][k] !== 0) used |= (1 << (board[i][k] - 1));
+              if (board[k][j] !== 0) used |= (1 << (board[k][j] - 1));
+            }
+            let startRow = Math.floor(i / 3) * 3;
+            let startCol = Math.floor(j / 3) * 3;
+            for (let r = startRow; r < startRow + 3; r++) {
+              for (let c = startCol; c < startCol + 3; c++) {
+                if (board[r][c] !== 0) used |= (1 << (board[r][c] - 1));
+              }
+            }
+            let newCandidates = [];
+            for (let num = 1; num <= 9; num++) {
+              if ((used & (1 << (num - 1))) === 0) newCandidates.push(num);
+            }
+            candidates[i][j] = newCandidates;
+          } else {
+            candidates[i][j] = [];
+          }
+        }
+      }
+    }
+
+    // 生成完整数独解（回溯法）
+    function generateFullBoard(board) {
+      const pos = findEmpty(board);
+      if (!pos) return true;
+      const [row, col] = pos;
+      let nums = shuffle([1,2,3,4,5,6,7,8,9]);
+      for (let num of nums) {
+        if (isValid(board, row, col, num)) {
+          board[row][col] = num;
+          if (generateFullBoard(board)) return true;
+          board[row][col] = 0;
+        }
+      }
+      return false;
+    }
+
+    function findEmpty(board) {
+      for (let i = 0; i < 9; i++) {
+        for (let j = 0; j < 9; j++) {
+          if (board[i][j] === 0) return [i, j];
+        }
+      }
+      return null;
+    }
+
+    function isValid(board, row, col, num) {
+      for (let i = 0; i < 9; i++) {
+        if (board[row][i] === num || board[i][col] === num) return false;
+      }
+      let startRow = Math.floor(row / 3) * 3;
+      let startCol = Math.floor(col / 3) * 3;
+      for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 3; j++) {
+          if (board[startRow+i][startCol+j] === num) return false;
+        }
+      }
+      return true;
+    }
+
+    function shuffle(array) {
+      for (let i = array.length - 1; i > 0; i--) {
+        let j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+      }
+      return array;
+    }
+
+    // 挖空：根据难度移除部分数字，并保证题目唯一性
+    function digHoles(board, difficulty) {
+      let holes;
+      if (difficulty === "easy") holes = 30;
+      else if (difficulty === "medium") holes = 40;
+      else if (difficulty === "hard") holes = 50;
+      else if (difficulty === "master") holes = 55;  // 大师等级：55个空格
+      let puzzle = board.map(row => row.slice());
+      let attempts = 0;
+      let maxAttempts = 5000;  // 最大尝试次数
+      while (holes > 0 && attempts < maxAttempts) {
+        attempts++;
+        let row = Math.floor(Math.random() * 9);
+        let col = Math.floor(Math.random() * 9);
+        if (puzzle[row][col] !== 0) {
+          let backup = puzzle[row][col];
+          puzzle[row][col] = 0;
+          let copy = puzzle.map(r => r.slice());
+          let count = 0;
+          solveSudoku(copy, () => { count++; if(count > 1) return true; });
+          if (count !== 1) {
+            puzzle[row][col] = backup;
+          } else {
+            holes--;
+          }
+        }
+      }
+      return puzzle;
+    }
+
+    // 数独求解器（回溯法），使用 callback 来中断计数（当解多于 1 时停止）
+    function solveSudoku(board, callback) {
+      const pos = findEmpty(board);
+      if (!pos) { callback(); return; }
+      const [row, col] = pos;
+      for (let num = 1; num <= 9; num++) {
+        if (isValid(board, row, col, num)) {
+          board[row][col] = num;
+          solveSudoku(board, callback);
+          board[row][col] = 0;
+        }
+      }
+    }
+
+    // 渲染棋盘：
+    // - 对于有确认数字的格子，始终显示确认数字；
+    // - 对于空格：若处于钢笔模式，则始终显示候补编辑区域（即使候补数组为空，供玩家编辑）；
+    //   如果处于非钢笔模式，则仅在 showCandidates 为 true 时显示候补数。
+    // - 高亮：对于有确认数字的格子，若数字等于 highlightDigit 则高亮；对于空格，
+    //   仅当 showCandidates 为 true 且候选数组中包含 highlightDigit 时高亮。
+    function renderBoard() {
+      const boardDiv = document.getElementById("sudoku-board");
+      boardDiv.innerHTML = "";
+      for (let i = 0; i < 9; i++) {
+        for (let j = 0; j < 9; j++) {
+          const cellDiv = document.createElement("div");
+          cellDiv.className = "cell";
+          cellDiv.dataset.row = i;
+          cellDiv.dataset.col = j;
+          
+          // 高亮处理
+          if (highlightDigit !== null) {
+            if (board[i][j] !== 0 && board[i][j] === highlightDigit) {
+              cellDiv.classList.add("highlight");
+            } else if (board[i][j] === 0 && showCandidates && candidates[i][j].includes(highlightDigit)) {
+              cellDiv.classList.add("highlight");
+            }
+          }
+          
+          if (board[i][j] !== 0) {
+            const confirmedDiv = document.createElement("div");
+            confirmedDiv.className = "confirmed";
+            confirmedDiv.innerText = board[i][j];
+            cellDiv.appendChild(confirmedDiv);
+          } else {
+            // 空格：若处于钢笔模式，则始终显示候补编辑区域（即使为空）；
+            // 如果处于非钢笔模式，则仅在 showCandidates 为 true 时显示候补数
+            if (pencilMode) {
+              const candidatesDiv = document.createElement("div");
+              candidatesDiv.className = "candidates";
+              candidatesDiv.innerText = candidates[i][j].join(" ");
+              cellDiv.appendChild(candidatesDiv);
+            } else if (showCandidates) {
+              const candidatesDiv = document.createElement("div");
+              candidatesDiv.className = "candidates";
+              candidatesDiv.innerText = candidates[i][j].join(" ");
+              cellDiv.appendChild(candidatesDiv);
+            }
+          }
+          cellDiv.addEventListener("click", selectCell);
+          boardDiv.appendChild(cellDiv);
+        }
+      }
+    }
+
+    // 点击单元格：如果该格有确认数字，则将该数字设为高亮数字，并刷新显示
+    function selectCell(event) {
+      if (selectedCell) selectedCell.classList.remove("selected");
+      selectedCell = event.currentTarget;
+      selectedCell.classList.add("selected");
+      const row = parseInt(selectedCell.dataset.row);
+      const col = parseInt(selectedCell.dataset.col);
+      if (board[row][col] !== 0) {
+        highlightDigit = board[row][col];
+      } else {
+        highlightDigit = null;
+      }
+      renderBoard();
+    }
+
+    // 键盘输入处理：根据当前模式决定写入确认数字或编辑候补数
+    document.addEventListener("keydown", (event) => {
+      if (!selectedCell) return;
+      const row = parseInt(selectedCell.dataset.row);
+      const col = parseInt(selectedCell.dataset.col);
+      const num = parseInt(event.key);
+      if (num >= 1 && num <= 9) {
+        if (pencilMode) {
+          // 铅笔模式：允许玩家编辑候补数，直接修改候补数组
+          let idx = candidates[row][col].indexOf(num);
+          if (idx === -1) {
+            candidates[row][col].push(num);
+          } else {
+            candidates[row][col].splice(idx, 1);
+          }
+        } else {
+          // 钢笔模式：写入确认数字，并更新候补数
+          if (isValid(board, row, col, num)) {
+            board[row][col] = num;
+            recalcAllCandidates();
+          } else {
+            alert("数字不符合规则！");
+          }
+        }
+        debouncedRender();
+        if (isComplete(board)) {
+          stopTimer();
+          alert("恭喜完成！");
+        }
+      }
+    });
+
+    // 检查棋盘是否填满
+    function isComplete(board) {
+      for (let i = 0; i < 9; i++) {
+        for (let j = 0; j < 9; j++) {
+          if (board[i][j] === 0) return false;
+        }
+      }
+      return true;
+    }
+
+    // 提示功能：当某空格候补数仅有一个时，给出提示信息
+    function showHint() {
+      recalcAllCandidates();
+      for (let i = 0; i < 9; i++) {
+        for (let j = 0; j < 9; j++) {
+          if (board[i][j] === 0 && candidates[i][j].length === 1) {
+            alert(`提示：单元格 (${i+1},${j+1}) 候补数仅有 ${candidates[i][j][0]}，因此可以确定为该数字。`);
+            return;
+          }
+        }
+      }
+      alert("当前状态暂无明显提示，请尝试其他区域。");
+    }
+
+    // 开始游戏：根据输入的唯一码（格式：种子-难度）或下拉框选择生成题面，并固定随机种子
+    function startGame() {
+      let codeInput = document.getElementById("code-input").value.trim();
+      let seed, diff;
+      if (codeInput !== "") {
+        let parts = codeInput.split("-");
+        if (parts.length === 2) {
+          seed = parts[0];
+          diff = parts[1];
+          document.getElementById("diff-select").style.display = "none";
+          document.getElementById("unique-code").innerText = codeInput;
+        } else {
+          alert("唯一码格式不正确，请使用格式：种子-难度（例如：123456-easy）");
+          return;
+        }
+      } else {
+        diff = document.getElementById("difficulty").value;
+        seed = Math.floor(Date.now() % 1000000000).toString();
+        let uniqueCode = seed + "-" + diff;
+        document.getElementById("unique-code").innerText = uniqueCode;
+        document.getElementById("diff-select").style.display = "block";
+      }
+      // 固定随机种子
+      Math.seedrandom(seed);
+
+      // 初始化棋盘
+      board = [];
+      for (let i = 0; i < 9; i++) {
+        board.push(new Array(9).fill(0));
+      }
+      generateFullBoard(board);
+      solution = board.map(row => row.slice());
+      board = digHoles(board, diff);
+      initCandidates();
+      // 默认处于钢笔模式时不显示候补数，且候补数组保持为空
+      showCandidates = false;
+      // 不调用 recalcAllCandidates()，保持候补数组为空
+      highlightDigit = null;
+      renderBoard();
+      startTimer();
+    }
+
+    // 计时器
+    function startTimer() {
+      startTime = Date.now();
+      if (timerInterval) clearInterval(timerInterval);
+      timerInterval = setInterval(() => {
+        const elapsed = Date.now() - startTime;
+        const minutes = Math.floor(elapsed / 60000);
+        const seconds = Math.floor((elapsed % 60000) / 1000);
+        document.getElementById("timer").innerText =
+          (minutes < 10 ? "0" + minutes : minutes) + ":" + (seconds < 10 ? "0" + seconds : seconds);
+      }, 1000);
+    }
+    function stopTimer() {
+      clearInterval(timerInterval);
+    }
+
+    // 切换输入模式（钢笔/铅笔）：切换后仅改变输入逻辑，不自动生成候补数；
+    // 当切换到铅笔模式时，如果尚未显示候补数，则将 showCandidates 设为 true（显示空候补编辑区域，供玩家输入）
+    document.getElementById("toggle-mode").addEventListener("click", () => {
+      pencilMode = !pencilMode;
+      if (pencilMode && !showCandidates) {
+        showCandidates = true;
+      }
+      document.getElementById("toggle-mode").innerText = pencilMode ? "切换模式（当前：铅笔）" : "切换模式（当前：钢笔）";
+      renderBoard();
+    });
+
+    document.getElementById("start-game").addEventListener("click", () => {
+      stopTimer();
+      startGame();
+    });
+
+    document.getElementById("hint-btn").addEventListener("click", showHint);
+
+    // 生成候补数按钮：点击后根据当前状态自动计算候补数（覆盖玩家已有编辑），设置显示标志为 true，然后刷新界面
+    document.getElementById("generate-candidates").addEventListener("click", () => {
+      recalcAllCandidates();
+      showCandidates = true;
+      renderBoard();
+      alert("候补数已生成！");
+    });
+  </script>
+</body>
+</html>
