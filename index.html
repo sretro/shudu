@@ -141,10 +141,10 @@
     <div class="control-block">
       <h2>难度选择</h2>
       <div class="difficulty-group">
-        <label><input type="radio" name="difficulty" value="easy" checked> 简单(挖31)</label>
-        <label><input type="radio" name="difficulty" value="medium"> 中级(挖40)</label>
-        <label><input type="radio" name="difficulty" value="hard"> 困难(挖49)</label>
-        <label><input type="radio" name="difficulty" value="master"> 大师(挖54)</label>
+        <label><input type="radio" name="difficulty" value="easy" checked> 简单</label>
+        <label><input type="radio" name="difficulty" value="medium"> 中级</label>
+        <label><input type="radio" name="difficulty" value="hard"> 困难</label>
+        <label><input type="radio" name="difficulty" value="master"> 大师</label>
       </div>
     </div>
     <div class="control-block">
@@ -261,11 +261,11 @@ function digHoles(fullGrid, difficulty){
   let puzzle=cloneGrid(fullGrid);
   let holes;
   switch(difficulty){
-    case "easy": holes=31; break;
-    case "medium": holes=40; break;
-    case "hard": holes=49; break;
-    case "master": holes=54; break;
-    default: holes=31;
+    case "easy": holes=33; break;
+    case "medium": holes=42; break;
+    case "hard": holes=50; break;
+    case "master": holes=56; break;
+    default: holes=33;
   }
   while(holes>0){
     let r=randomInt(0,8), c=randomInt(0,8);
