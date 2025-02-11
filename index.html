@@ -1,742 +1,1079 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
-  <title>数独游戏</title>
-
-  <!-- 引入seedrandom库（如需本地使用，请下载并改为相对路径） -->
-  
+  <meta charset="UTF-8">
+  <title>Sudoku - 优化候选数逻辑</title>
+  <script src="https://cdn.jsdelivr.net/npm/seedrandom/dist/seedrandom.min.js"></script>
   <style>
-/* 全局基础样式 */
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
+    :root {
+      --bg-color: #f3f6fb;
+      --card-bg: #fff;
+      --primary-color: #1976d2; 
+      --primary-dark: #004ba0;
+      --accent-color: #ffca28;
+      --error-color: #e53935;
+      --success-color: #43a047;
+      --text-color: #333;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Microsoft YaHei", sans-serif;
+      background: var(--bg-color);
+      color: var(--text-color);
+      display: flex; flex-direction: column;
+      min-height: 100vh; margin: 0;
+    }
+    header {
+      text-align: center; padding: 20px; background: var(--card-bg);
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 10px;
+    }
+    header h1 { font-size: 2rem; color: var(--primary-color); letter-spacing: 1px; }
+    .game-container {
+      display: flex; flex-direction: row; gap: 20px; max-width: 1200px;
+      width: 100%; margin: 0 auto; padding: 10px; flex: 1;
+    }
+    .controls {
+      width: 260px; flex-shrink: 0; display: flex; flex-direction: column; gap: 15px;
+    }
+    .control-block {
+      background: var(--card-bg);
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      padding: 10px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .control-block h2 {
+      font-size: 1rem; margin-bottom: 8px; color: #555;
+    }
+    .difficulty-group label {
+      display: block; margin: 4px 0; cursor: pointer;
+    }
+    .seed-group input {
+      width: 100%; padding: 6px; border-radius: 4px; border: 1px solid #ccc; font: inherit;
+    }
+    .btn {
+      display: inline-block; background: var(--primary-color); color: #fff;
+      padding: 6px 12px; border-radius: 4px; text-decoration: none;
+      text-align: center; cursor: pointer; margin: 3px 0; transition: background 0.2s ease, transform 0.1s ease;
+      font-size: 0.9rem;
+    }
+    .btn:hover { background: var(--primary-dark); }
+    .btn:active { transform: scale(0.97); }
+    .btn[disabled] { opacity: 0.6; cursor: not-allowed; }
+    .info { margin-top: 5px; font-size: 0.85rem; min-height: 20px; }
+    .error { color: var(--error-color); font-weight: bold; }
+    .success { color: var(--success-color); font-weight: bold; }
 
-body {
-  font-family: "Microsoft YaHei", sans-serif;
-  background: #f2f2f2;
-  color: #333;
-  line-height: 1.5;
-  padding: 20px;
-}
+    .board-area {
+      flex: 1; display: flex; flex-direction: column; align-items: center; gap: 10px;
+    }
+    .sudoku-board {
+      width: 405px; table-layout: fixed; border-collapse: collapse; border: 2px solid #000;
+      background: #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    }
+    .sudoku-board td {
+      width: 45px; height: 45px; line-height: 45px;
+      text-align: center; vertical-align: middle; border: 1px solid #bbb;
+      font-size: 1rem; font-weight: bold; color: #333; position: relative;
+      cursor: pointer; transition: background-color 0.2s ease; overflow: hidden;
+    }
+    .sudoku-board tr:nth-child(3n) td { border-bottom: 2px solid #000; }
+    .sudoku-board td:nth-child(3n) { border-right: 2px solid #000; }
+    .sudoku-board td:nth-child(1),
+    .sudoku-board td:nth-child(4),
+    .sudoku-board td:nth-child(7) { border-left: 2px solid #000; }
+    .sudoku-board tr:nth-child(1),
+    .sudoku-board tr:nth-child(4),
+    .sudoku-board tr:nth-child(7) { border-top: 2px solid #000; }
+    .sudoku-board td:hover { background-color: #f5f5f5; }
+    .selected-cell {
+      background-color: #ccefff !important;
+      outline: 2px solid var(--primary-color);
+      z-index: 1;
+    }
+    .highlight {
+      background-color: var(--accent-color) !important;
+    }
+    .candidate {
+      position: absolute; top: 2px; left: 2px; right: 2px;
+      font-size: 0.7rem; line-height: 1.1; color: #666; overflow: hidden; text-align: left; padding: 2px;
+    }
+    .message {
+      margin-top: 5px;
+      min-height: 20px;
+      padding: 6px;
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      color: #333;
+    }
 
-h1 {
-  text-align: center;
-  margin-bottom: 20px;
-  color: #4a4a4a;
-}
-
-/* 布局：左侧控制栏 + 右侧棋盘 */
-.game-container {
-  display: flex;
-  justify-content: center;  /* 横向居中容器 */
-  gap: 30px;
-  margin: 0 auto;
-  max-width: 1200px;
-}
-
-/* 左侧控制面板 */
-.controls {
-  width: 240px;
-  display: flex;
-  flex-direction: column;
-  gap: 15px;
-}
-.control-block {
-  background: #fff;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  padding: 10px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-}
-.control-block h2 {
-  font-size: 16px;
-  margin-bottom: 8px;
-  color: #555;
-}
-
-/* 按钮及输入框样式 */
-.btn {
-  display: inline-block;
-  background: #4285f4;
-  color: #fff;
-  padding: 6px 10px;
-  border-radius: 4px;
-  text-decoration: none;
-  text-align: center;
-  cursor: pointer;
-  margin: 2px 0;
-  transition: background 0.2s ease, transform 0.1s ease;
-}
-.btn:hover {
-  background: #3367d6;
-}
-.btn:active {
-  transform: scale(0.97);
-}
-.btn[disabled] {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.seed-group input {
-  width: 100%;
-  padding: 6px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  font: inherit;
-}
-
-/* 单选组 */
-.difficulty-group label,
-.pen-pencil-group label {
-  cursor: pointer;
-  margin: 4px 0;
-}
-
-/* 数字按钮区域 */
-.numbers {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-.numbers .btn {
-  width: 40px;
-  text-align: center;
-  padding: 8px 0;
-}
-
-/* 信息展示区域 */
-.info {
-  margin-top: 5px;
-  font-size: 14px;
-  min-height: 18px;  /* 保留一些空间，避免文本跳动 */
-}
-.error {
-  color: red;
-  font-weight: bold;
-}
-.success {
-  color: green;
-  font-weight: bold;
-}
-
-/* ======== 数独棋盘部分 ======== */
-.sudoku-board {
-  background: #fff;
-  border: 2px solid #000;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
-  transition: box-shadow 0.2s ease;
-  
-  /* 固定布局，按固定列宽渲染 */
-  table-layout: fixed;
-  /* 9 列 × 45px = 405px */
-  width: 405px;
-  border-collapse: collapse;
-}
-
-.sudoku-board:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
-}
-
-/* 棋盘单元格 */
-.sudoku-board td {
-  /* 强制 45×45 格子 */
-  width: 75px;
-  height: 45px;
-  line-height: 45px;  /* 保证单行文字垂直居中 */
-  
-  /* 去除默认的单元格内边距/外边距 */
-  padding: 0;
-  margin: 0;
-  
-  text-align: center;
-  vertical-align: middle;
-  border: 1px solid #ccc;
-  position: relative;
-  font-size: 18px;
-  font-weight: bold;
-  color: #333;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-  overflow: hidden;  /* 多余内容不显示（候选数多行时会被截断） */
-}
-
-/* 棋盘中每 3 行/列画粗线，区分宫格 */
-.sudoku-board tr:nth-child(3n) td {
-  border-bottom: 2px solid #000;
-}
-.sudoku-board td:nth-child(3n) {
-  border-right: 2px solid #000;
-}
-.sudoku-board td:nth-child(1),
-.sudoku-board td:nth-child(4),
-.sudoku-board td:nth-child(7) {
-  border-left: 2px solid #000;
-}
-.sudoku-board tr:nth-child(1),
-.sudoku-board tr:nth-child(4),
-.sudoku-board tr:nth-child(7) {
-  border-top: 2px solid #000;
-}
-
-/* 鼠标悬停格子背景微变 */
-.sudoku-board td:hover {
-  background-color: #f5f5f5;
-}
-
-/* 选中单元格/高亮单元格 */
-.selected-cell {
-  background-color: #ccefff !important;
-  outline: 2px solid #4285f4;
-}
-.highlight {
-  background-color: #fcf8e3 !important;
-}
-
-/* ======== 候选数 (铅笔标记) ======== */
-.candidate {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  right: 2px;
-  
-  font-size: 10px;
-  line-height: 12px;
-  color: #666;
-  /* 如果不想多行换行，可以加上：white-space: nowrap; */
-  
-  /* 超出隐藏 */
-  overflow: hidden;
-}
-
+    @media (max-width: 768px) {
+      .game-container {
+        flex-direction: column; align-items: center;
+      }
+      .controls { width: 90%; order: 2; }
+      .board-area { order: 1; }
+      .sudoku-board { width: 90vw; }
+      .sudoku-board td {
+        width: calc((90vw - 2px) / 9);
+        height: calc((90vw - 2px) / 9);
+        line-height: calc((90vw - 2px) / 9);
+      }
+    }
+    footer {
+      text-align: center; padding: 10px; font-size: 0.85rem; color: #999;
+      background: var(--card-bg); box-shadow: 0 -1px 3px rgba(0,0,0,0.1);
+    }
   </style>
     <script src="seedrandom.min.js"></script>
 
 </head>
 <body>
 
-  <h1>数独游戏示例</h1>
-  <div class="game-container">
-    <!-- 左侧：控制面板 -->
-    <div class="controls">
-      <div class="control-block">
-        <h2>难度选择</h2>
-        <div class="difficulty-group">
-          <label><input type="radio" name="difficulty" value="easy" checked> 简单 </label>
-          <label><input type="radio" name="difficulty" value="medium"> 中级 </label>
-          <label><input type="radio" name="difficulty" value="hard"> 困难 </label>
-          <label><input type="radio" name="difficulty" value="master"> 大师 </label>
-        </div>
-      </div>
+<header>
+  <h1>Sudoku - 优化候选数逻辑</h1>
+</header>
 
-      <div class="control-block">
-        <h2>种子 (Seed)</h2>
-        <div class="seed-group">
-          <input type="text" id="seed-input" placeholder="留空则自动生成种子" />
-        </div>
-      </div>
-
-      <div class="control-block">
-        <h2>游戏操作</h2>
-        <a class="btn" id="start-game">开始游戏</a>
-        <div class="pen-pencil-group">
-          <label><input type="radio" name="mode" value="pen" checked> 钢笔模式</label>
-          <label><input type="radio" name="mode" value="pencil"> 铅笔模式</label>
-        </div>
-        <a class="btn" id="fill-candidates">补全候选数</a>
-        <a class="btn" id="hint">提示</a>
-      </div>
-
-      <div class="control-block">
-        <h2>数字输入</h2>
-        <div class="numbers">
-          <!-- 数字 1-9 按钮 -->
-          <a class="btn num-btn" data-num="1">1</a>
-          <a class="btn num-btn" data-num="2">2</a>
-          <a class="btn num-btn" data-num="3">3</a>
-          <a class="btn num-btn" data-num="4">4</a>
-          <a class="btn num-btn" data-num="5">5</a>
-          <a class="btn num-btn" data-num="6">6</a>
-          <a class="btn num-btn" data-num="7">7</a>
-          <a class="btn num-btn" data-num="8">8</a>
-          <a class="btn num-btn" data-num="9">9</a>
-        </div>
-      </div>
-
-      <div class="control-block">
-        <div class="info error" id="error-info"></div>
-        <div class="info success" id="success-info"></div>
+<div class="game-container">
+  <!-- 控制面板 -->
+  <div class="controls">
+    <div class="control-block">
+      <h2>难度选择</h2>
+      <div class="difficulty-group">
+        <label><input type="radio" name="difficulty" value="easy" checked> 简单(挖31)</label>
+        <label><input type="radio" name="difficulty" value="medium"> 中级(挖40)</label>
+        <label><input type="radio" name="difficulty" value="hard"> 困难(挖49)</label>
+        <label><input type="radio" name="difficulty" value="master"> 大师(挖54)</label>
       </div>
     </div>
-
-    <!-- 右侧：数独棋盘 -->
-    <table class="sudoku-board" id="sudoku-board">
-      <!-- JS动态创建 9x9 td -->
-    </table>
+    <div class="control-block">
+      <h2>种子(6位)</h2>
+      <div class="seed-group">
+        <input type="text" id="seed-input" placeholder="例：212345">
+      </div>
+    </div>
+    <div class="control-block">
+      <h2>游戏操作</h2>
+      <a class="btn" id="start-game">开始游戏</a><br/>
+      <label><input type="radio" name="mode" value="pen" checked> 钢笔</label>
+      <label><input type="radio" name="mode" value="pencil"> 铅笔</label><br/>
+      <a class="btn" id="fill-candidates">补全候选数</a>
+      <a class="btn" id="btn-hint">提示</a>
+      <div class="message" id="hint-msg"></div>
+    </div>
+    <div class="control-block">
+      <h2>错误 / 提示</h2>
+      <div class="info error" id="error-info"></div>
+      <div class="info success" id="success-info"></div>
+    </div>
+    <div class="control-block">
+      <h2>数字输入</h2>
+      <div>
+        <a class="btn num-btn" data-num="1">1</a>
+        <a class="btn num-btn" data-num="2">2</a>
+        <a class="btn num-btn" data-num="3">3</a>
+        <a class="btn num-btn" data-num="4">4</a>
+        <a class="btn num-btn" data-num="5">5</a>
+        <a class="btn num-btn" data-num="6">6</a>
+        <a class="btn num-btn" data-num="7">7</a>
+        <a class="btn num-btn" data-num="8">8</a>
+        <a class="btn num-btn" data-num="9">9</a>
+      </div>
+    </div>
   </div>
 
-  <script>
-    /******************************************************
-     * 1. 全局变量及数据结构
-     ******************************************************/
-    let solutionGrid = [];       // 存储完整解（若需严格对比最终结果，可做校验）
-    let puzzleGrid = [];         // 存储题目（挖空）
-    let candidatesGrid = [];     // 存储候选数信息(二维数组，每个元素是Set)
-    let selectedCell = null;     // 当前选中的格子( td DOM元素 )
-    let errorCount = 0;          // 答案错误次数，超过4次则游戏结束
-    const maxErrors = 4;
-    let rng = Math.random;       // 默认随机函数，后面会根据种子来重新赋值
+  <!-- 棋盘 -->
+  <div class="board-area">
+    <table class="sudoku-board" id="sudoku-board"></table>
+  </div>
+</div>
 
-    /******************************************************
-     * 2. 工具函数：基于 seedrandom 的随机、数独核心操作
-     ******************************************************/
+<footer>Sudoku Demo &copy; 2025</footer>
 
-    // 在 [start, end] 区间内返回随机整数 (包含end)
-    function randomInt(start, end) {
-      return Math.floor(rng() * (end - start + 1)) + start;
+<script>
+/**************************************************************
+ * 1. 全局变量、数据结构
+ **************************************************************/
+let solutionGrid = [];
+let puzzleGrid = [];
+// candidatesGrid[r][c] = Set(数字) => 当前“已展示”的候选
+let candidatesGrid = [];
+let selectedCell = null;
+let errorCount = 0;
+const maxErrors = 4;
+let rng = Math.random;
+
+let currentHighlightNum = null;
+
+/** 种子：1位难度(0~3) + 5位随机数(00001~99999) => 6位 */
+const difficultyMap = { easy:"0", medium:"1", hard:"2", master:"3" };
+const difficultyMapReverse = { "0":"easy", "1":"medium", "2":"hard", "3":"master" };
+
+const sudokuBoard = document.getElementById('sudoku-board');
+const seedInput = document.getElementById('seed-input');
+const errorInfo = document.getElementById('error-info');
+const successInfo = document.getElementById('success-info');
+
+/**************************************************************
+ * 2. 核心数独(回溯、挖空)
+ **************************************************************/
+function randomInt(min, max){ 
+  return Math.floor(rng()*(max-min+1))+min;
+}
+function isValid(grid, row, col, n){
+  for(let c=0;c<9;c++){
+    if(grid[row][c]===n) return false;
+  }
+  for(let r=0;r<9;r++){
+    if(grid[r][col]===n) return false;
+  }
+  let boxRow=Math.floor(row/3)*3, boxCol=Math.floor(col/3)*3;
+  for(let rr=0; rr<3; rr++){
+    for(let cc=0; cc<3; cc++){
+      if(grid[boxRow+rr][boxCol+cc]===n) return false;
     }
-
-    // 检查数字 n 放置在 grid[row][col] 是否符合 行列宫 的约束
-    function isValid(grid, row, col, n) {
-      // 行
-      for (let c = 0; c < 9; c++) {
-        if (grid[row][c] === n) return false;
-      }
-      // 列
-      for (let r = 0; r < 9; r++) {
-        if (grid[r][col] === n) return false;
-      }
-      // 宫
-      const boxRow = Math.floor(row / 3) * 3;
-      const boxCol = Math.floor(col / 3) * 3;
-      for (let rr = 0; rr < 3; rr++) {
-        for (let cc = 0; cc < 3; cc++) {
-          if (grid[boxRow + rr][boxCol + cc] === n) return false;
-        }
-      }
-      return true;
-    }
-
-    // 生成一个完整解(回溯+随机顺序)
-    function generateSolution() {
-      let grid = Array.from({ length: 9 }, () => Array(9).fill(0));
-
-      function fillCell(row, col) {
-        if (row === 9) {
-          // 递归到底，成功
-          return true;
-        }
-        let nextRow = row, nextCol = col + 1;
-        if (nextCol === 9) {
-          nextRow++;
-          nextCol = 0;
-        }
-
-        let nums = [1,2,3,4,5,6,7,8,9];
-        nums.sort(() => rng() - 0.5);  // 随机打乱
-
-        for (let n of nums) {
-          if (isValid(grid, row, col, n)) {
-            grid[row][col] = n;
-            if (fillCell(nextRow, nextCol)) {
-              return true;
-            }
-            // 回溯
-            grid[row][col] = 0;
-          }
-        }
-        return false;
-      }
-
-      fillCell(0, 0);
-      return grid;
-    }
-
-    // 复制 grid
-    function cloneGrid(grid) {
-      return grid.map(row => row.slice());
-    }
-
-    // 根据难度挖空
-    function digHoles(grid, difficulty) {
-      let puzzle = cloneGrid(grid);
-
-      let holesCount;
-      switch(difficulty) {
-        case 'easy': holesCount = 31; break;
-        case 'medium': holesCount = 40; break;
-        case 'hard': holesCount = 49; break;
-        case 'master': holesCount = 54; break;
-        default: holesCount = 31;
-      }
-
-      let attempts = holesCount;
-      while (attempts > 0) {
-        const row = randomInt(0, 8);
-        const col = randomInt(0, 8);
-        if (puzzle[row][col] !== 0) {
-          puzzle[row][col] = 0;
-          attempts--;
-        }
-      }
-      return puzzle;
-    }
-
-    /******************************************************
-     * 3. 初始化与 UI 相关
-     ******************************************************/
-    const sudokuBoard = document.getElementById('sudoku-board');
-    const startGameBtn = document.getElementById('start-game');
-    const fillCandidatesBtn = document.getElementById('fill-candidates');
-    const hintBtn = document.getElementById('hint');
-    const errorInfo = document.getElementById('error-info');
-    const successInfo = document.getElementById('success-info');
-    const seedInput = document.getElementById('seed-input');
-
-    // 创建 9x9 单元格
-    function createBoardCells() {
-      sudokuBoard.innerHTML = '';
-      for (let r = 0; r < 9; r++) {
-        let tr = document.createElement('tr');
-        for (let c = 0; c < 9; c++) {
-          let td = document.createElement('td');
-          td.dataset.row = r;
-          td.dataset.col = c;
-          td.addEventListener('click', onCellClick);
-          tr.appendChild(td);
-        }
-        sudokuBoard.appendChild(tr);
+  }
+  return true;
+}
+function generateSolution(){
+  let grid=Array.from({length:9},()=>Array(9).fill(0));
+  function fillCell(r,c){
+    if(r===9) return true;
+    let nextR=r, nextC=c+1;
+    if(nextC===9){ nextR++; nextC=0; }
+    let nums=[1,2,3,4,5,6,7,8,9];
+    nums.sort(()=>rng()-0.5);
+    for(let n of nums){
+      if(isValid(grid,r,c,n)){
+        grid[r][c]=n;
+        if(fillCell(nextR,nextC)) return true;
+        grid[r][c]=0;
       }
     }
-
-    // 根据 puzzleGrid 渲染到界面
-    function renderPuzzle() {
-      for (let r = 0; r < 9; r++) {
-        for (let c = 0; c < 9; c++) {
-          let td = sudokuBoard.rows[r].cells[c];
-          td.classList.remove('selected-cell', 'highlight');
-          td.innerHTML = '';
-          td.style.color = '#333';
-          let val = puzzleGrid[r][c];
-          if (val !== 0) {
-            td.textContent = val;
-            td.dataset.fixed = 'true';   // 固定数字标记
-          } else {
-            td.textContent = '';
-            td.dataset.fixed = 'false';
-          }
-        }
-      }
+    return false;
+  }
+  fillCell(0,0);
+  return grid;
+}
+function cloneGrid(g){ return g.map(row=>row.slice()); }
+function digHoles(fullGrid, difficulty){
+  let puzzle=cloneGrid(fullGrid);
+  let holes;
+  switch(difficulty){
+    case "easy": holes=31; break;
+    case "medium": holes=40; break;
+    case "hard": holes=49; break;
+    case "master": holes=54; break;
+    default: holes=31;
+  }
+  while(holes>0){
+    let r=randomInt(0,8), c=randomInt(0,8);
+    if(puzzle[r][c]!==0){
+      puzzle[r][c]=0;
+      holes--;
     }
+  }
+  return puzzle;
+}
 
-    // 重置错误和提示信息
-    function resetInfo() {
-      errorCount = 0;
-      errorInfo.textContent = '';
-      successInfo.textContent = '';
+/** 6位种子 => 第1位难度(0~3) + 5位随机数 */
+function encodeSeed(difficulty, seedNumber){
+  let diffCode=difficultyMap[difficulty]||"0";
+  let seedStr=String(seedNumber).padStart(5,'0');
+  return diffCode+seedStr;
+}
+function decodeSeed(s){
+  if(s.length!==6) return null;
+  let diffCode=s[0], seedPart=s.slice(1);
+  let diff=difficultyMapReverse[diffCode];
+  if(!diff) return null;
+  let seedNum=parseInt(seedPart,10);
+  if(isNaN(seedNum)) return null;
+  return { difficulty:diff, seedNumber:seedNum };
+}
+
+/**************************************************************
+ * 3. 初始化 & 界面渲染
+ **************************************************************/
+function createBoardCells(){
+  sudokuBoard.innerHTML='';
+  for(let r=0;r<9;r++){
+    let tr=document.createElement('tr');
+    for(let c=0;c<9;c++){
+      let td=document.createElement('td');
+      td.dataset.row=r;
+      td.dataset.col=c;
+      td.addEventListener('click', onCellClick);
+      tr.appendChild(td);
     }
-
-    // 初始化候选数结构
-    function initCandidates() {
-      candidatesGrid = Array.from({ length: 9 }, () => 
-        Array.from({ length: 9 }, () => new Set())
-      );
-    }
-
-    // 计算某个格子的候选数
-    function computeCandidatesForCell(r, c) {
-      if (puzzleGrid[r][c] !== 0) {
-        candidatesGrid[r][c].clear();
-        return;
-      }
-      let possible = new Set([1,2,3,4,5,6,7,8,9]);
-      // 去除行里已有数字
-      for (let col = 0; col < 9; col++) {
-        if (puzzleGrid[r][col] !== 0) {
-          possible.delete(puzzleGrid[r][col]);
-        }
-      }
-      // 去除列里已有数字
-      for (let row = 0; row < 9; row++) {
-        if (puzzleGrid[row][c] !== 0) {
-          possible.delete(puzzleGrid[row][c]);
-        }
-      }
-      // 去除宫里已有数字
-      const boxRow = Math.floor(r / 3) * 3;
-      const boxCol = Math.floor(c / 3) * 3;
-      for (let rr = 0; rr < 3; rr++) {
-        for (let cc = 0; cc < 3; cc++) {
-          let val = puzzleGrid[boxRow + rr][boxCol + cc];
-          if (val !== 0) {
-            possible.delete(val);
-          }
-        }
-      }
-      candidatesGrid[r][c] = possible;
-    }
-
-    // 计算所有格子的候选数
-    function computeAllCandidates() {
-      for (let r = 0; r < 9; r++) {
-        for (let c = 0; c < 9; c++) {
-          computeCandidatesForCell(r, c);
-        }
-      }
-    }
-
-    // 在界面上渲染候选数
-    function renderCandidates() {
-      for (let r = 0; r < 9; r++) {
-        for (let c = 0; c < 9; c++) {
-          let td = sudokuBoard.rows[r].cells[c];
-          if (puzzleGrid[r][c] === 0) {
-            let set = candidatesGrid[r][c];
-            if (set.size > 0) {
-              td.innerHTML = '<div class="candidate">' + [...set].join(' ') + '</div>';
-            } else {
-              td.innerHTML = '';
-            }
-          }
-        }
-      }
-    }
-
-    /******************************************************
-     * 4. 事件处理
-     ******************************************************/
-
-    // 点击单元格
-    function onCellClick(e) {
-      let td = e.currentTarget;
-      // 如果是固定数字，选中后高亮相同数字
-      if (td.dataset.fixed === 'true') {
-        highlightNumber(td.textContent);
+    sudokuBoard.appendChild(tr);
+  }
+}
+function renderPuzzle(){
+  for(let r=0;r<9;r++){
+    for(let c=0;c<9;c++){
+      let td=sudokuBoard.rows[r].cells[c];
+      td.classList.remove('selected-cell','highlight');
+      td.innerHTML='';
+      let val=puzzleGrid[r][c];
+      if(val!==0){
+        td.textContent=val;
+        td.dataset.fixed='true';
       } else {
-        // 如果是空格子，取消所有高亮
-        clearHighlight();
+        td.dataset.fixed='false';
       }
-      // 切换选中单元格
-      if (selectedCell) {
-        selectedCell.classList.remove('selected-cell');
-      }
-      td.classList.add('selected-cell');
-      selectedCell = td;
     }
+  }
+}
+function resetInfo(){
+  errorCount=0;
+  errorInfo.textContent='';
+  successInfo.textContent='';
+}
+function initCandidates(){
+  candidatesGrid=Array.from({length:9},()=>
+    Array.from({length:9},()=> new Set())
+  );
+}
 
-    // 高亮所有与 num 相同的单元格
-    function highlightNumber(num) {
-      clearHighlight();
-      for (let r = 0; r < 9; r++) {
-        for (let c = 0; c < 9; c++) {
-          let td = sudokuBoard.rows[r].cells[c];
-          if (td.textContent === num) {
+/**************************************************************
+ * 4. 候选数的“补全” & “显示”逻辑
+ **************************************************************/
+function computeAllCandidates(){
+  // 先清空
+  for(let r=0;r<9;r++){
+    for(let c=0;c<9;c++){
+      candidatesGrid[r][c].clear();
+    }
+  }
+  // 对每个空格 => 计算所有可能数字
+  for(let r=0;r<9;r++){
+    for(let c=0;c<9;c++){
+      if(puzzleGrid[r][c]===0){
+        let poss=new Set([1,2,3,4,5,6,7,8,9]);
+        // 行
+        for(let col=0;col<9;col++){
+          if(puzzleGrid[r][col]!==0) poss.delete(puzzleGrid[r][col]);
+        }
+        // 列
+        for(let row=0;row<9;row++){
+          if(puzzleGrid[row][c]!==0) poss.delete(puzzleGrid[row][c]);
+        }
+        // 宫
+        let boxR=Math.floor(r/3)*3, boxC=Math.floor(c/3)*3;
+        for(let rr=0; rr<3; rr++){
+          for(let cc=0; cc<3; cc++){
+            let val=puzzleGrid[boxR+rr][boxC+cc];
+            if(val!==0) poss.delete(val);
+          }
+        }
+        candidatesGrid[r][c]=poss;
+      }
+    }
+  }
+}
+function renderCandidates(){
+  for(let r=0;r<9;r++){
+    for(let c=0;c<9;c++){
+      let td=sudokuBoard.rows[r].cells[c];
+      if(puzzleGrid[r][c]===0){
+        // 显示 candidatesGrid[r][c]
+        let set=candidatesGrid[r][c];
+        if(set.size>0){
+          td.innerHTML=`<div class="candidate">${[...set].join(' ')}</div>`;
+        } else {
+          td.innerHTML='';
+        }
+      }
+    }
+  }
+}
+/**************************************************************
+ * 4. “点亮”功能
+ **************************************************************/
+/** 清除所有 highlight */
+function clearAllHighlight(){
+  for(let r=0;r<9;r++){
+    for(let c=0;c<9;c++){
+      sudokuBoard.rows[r].cells[c].classList.remove('highlight');
+    }
+  }
+}
+
+/**
+ * 只点亮 “实际展示” 的数字（含候选）
+ * - puzzleGrid[r][c] == num => highlight
+ * - 候选div里若包含该数字 => highlight
+ */
+function highlightCellsWithNumber(num){
+  for(let r=0;r<9;r++){
+    for(let c=0;c<9;c++){
+      let td=sudokuBoard.rows[r].cells[c];
+      let val=puzzleGrid[r][c];
+      if(val===num){
+        td.classList.add('highlight');
+      } else if(val===0){
+        // 查看可见候选div
+        let candDiv=td.querySelector('.candidate');
+        if(candDiv) {
+          // 将文本拆分空格，若包含num则高亮
+          let textArr=candDiv.textContent.split(/\s+/);
+          if(textArr.includes(String(num))){
             td.classList.add('highlight');
           }
         }
       }
     }
+  }
+}
 
-    // 清除高亮
-    function clearHighlight() {
-      for (let r = 0; r < 9; r++) {
-        for (let c = 0; c < 9; c++) {
-          sudokuBoard.rows[r].cells[c].classList.remove('highlight');
+/**
+ * 设置当前高亮数字：
+ * - 若 num===null 或 num===currentHighlightNum => 取消点亮
+ * - 否则切换到新数字
+ */
+function setHighlightNumber(num){
+  if(num===null || num===currentHighlightNum){
+    clearAllHighlight();
+    currentHighlightNum=null;
+  } else {
+    clearAllHighlight();
+    highlightCellsWithNumber(num);
+    currentHighlightNum=num;
+  }
+}
+/**************************************************************
+ * 5. 点击格子 & 输入数字
+ **************************************************************/
+function onCellClick(e){
+  let td=e.currentTarget;
+  if(selectedCell===td){
+    // 再次点击同一个格 => 取消选中
+    td.classList.remove('selected-cell');
+    selectedCell=null;
+    setHighlightNumber(null); 
+    return;
+  }
+  if(selectedCell){
+    selectedCell.classList.remove('selected-cell');
+  }
+  td.classList.add('selected-cell');
+  selectedCell=td;
+  let r=+td.dataset.row, c=+td.dataset.col;
+  let val=puzzleGrid[r][c];
+  if(val!==0){
+    setHighlightNumber(val);
+  } else {
+    setHighlightNumber(null);
+  }
+
+}
+function checkWin(){
+  for(let r=0;r<9;r++){
+    for(let c=0;c<9;c++){
+      if(puzzleGrid[r][c]===0) return false;
+    }
+  }
+  return true;
+}
+function gameOver(){
+  errorInfo.textContent='错误次数过多，游戏结束！';
+  let tds=sudokuBoard.getElementsByTagName('td');
+  for(let td of tds){
+    td.removeEventListener('click', onCellClick);
+  }
+}
+
+/** 数字输入逻辑(点击数字按钮或键盘) */
+function onNumberInput(num){
+  if(!selectedCell) return;
+  if(selectedCell.dataset.fixed==='true') return; // 固定数字格，不能改
+
+  let r=+selectedCell.dataset.row, c=+selectedCell.dataset.col;
+  let mode=document.querySelector('input[name="mode"]:checked').value;
+  if(mode==='pen'){
+    // 钢笔：若有效 => 放入 puzzleGrid => 只删除相关联格子里已展示的候选
+    if(isValid(puzzleGrid,r,c,num)){
+      puzzleGrid[r][c]=num;
+      selectedCell.textContent=num;
+      selectedCell.style.color="var(--primary-color)";
+      removeCandidateFromPeers(r,c,num); // 只做“删除”
+      if(checkWin()){
+        successInfo.textContent='恭喜完成！';
+      }
+    } else {
+      // 错误一次
+      errorCount++;
+      errorInfo.textContent=`错误：${errorCount}/${maxErrors}`;
+      if(errorCount>=maxErrors){
+        gameOver();
+      }
+    }
+  } else {
+    // 铅笔：只对当前位置的候选集做添加/删除 => 重绘
+    if(puzzleGrid[r][c]!==0) return; // 已有数则不进行铅笔操作
+
+    let set=candidatesGrid[r][c];
+    if(set.has(num)){
+      set.delete(num);
+    } else {
+      set.add(num);
+    }
+    renderCandidateToCell(r,c);
+  }
+}
+
+/** 钢笔输入正确数字 => 只删除 peers 里已展示的候选数 num，不添加任何东西 */
+function removeCandidateFromPeers(r,c,num){
+  // 同行
+  for(let col=0; col<9; col++){
+    if(candidatesGrid[r][col].has(num)){
+      candidatesGrid[r][col].delete(num);
+      renderCandidateToCell(r,col);
+    }
+  }
+  // 同列
+  for(let row=0; row<9; row++){
+    if(candidatesGrid[row][c].has(num)){
+      candidatesGrid[row][c].delete(num);
+      renderCandidateToCell(row,c);
+    }
+  }
+  // 同宫
+  let boxR=Math.floor(r/3)*3, boxC=Math.floor(c/3)*3;
+  for(let rr=0; rr<3; rr++){
+    for(let cc=0; cc<3; cc++){
+      let cr=boxR+rr, cc2=boxC+cc;
+      if(candidatesGrid[cr][cc2].has(num)){
+        candidatesGrid[cr][cc2].delete(num);
+        renderCandidateToCell(cr,cc2);
+      }
+    }
+  }
+}
+
+/** 只刷新一个格子的候选显示 */
+function renderCandidateToCell(r,c){
+  let td=sudokuBoard.rows[r].cells[c];
+  if(puzzleGrid[r][c]===0){
+    let set=candidatesGrid[r][c];
+    if(set.size>0){
+      td.innerHTML=`<div class="candidate">${[...set].join(' ')}</div>`;
+    } else {
+      td.innerHTML='';
+    }
+  }
+}
+
+/**************************************************************
+ * 6. “开始游戏”按钮 => 6位种子 解析/生成
+ **************************************************************/
+document.getElementById('start-game').addEventListener('click', ()=>{
+  resetInfo();
+  createBoardCells();
+  selectedCell=null;
+
+  let seedVal=seedInput.value.trim();
+  if(seedVal){
+    // 有种子 => decode => 忽略难度单选
+    let decoded=decodeSeed(seedVal);
+    if(!decoded){
+      alert('无效种子(6位)');
+      return;
+    }
+    let diff=decoded.difficulty, seedNum=decoded.seedNumber;
+    rng=new Math.seedrandom(String(seedNum));
+    solutionGrid=generateSolution();
+    puzzleGrid=digHoles(solutionGrid,diff);
+  } else {
+    // 无种子 => 用难度+随机 => 反写
+    let diff=document.querySelector('input[name="difficulty"]:checked').value;
+    let randomSeedNum=randomInt(1,99999);
+    rng=new Math.seedrandom(String(randomSeedNum));
+    solutionGrid=generateSolution();
+    puzzleGrid=digHoles(solutionGrid,diff);
+    let finalSeed=encodeSeed(diff,randomSeedNum);
+    seedInput.value=finalSeed;
+  }
+
+  renderPuzzle();
+  initCandidates();
+});
+
+/**************************************************************
+ * 2. 提示：统一入口 getHint()
+ * 依次检测多种技巧 => 返回第一条提示
+ **************************************************************/
+function getHint(){
+  let res;
+  // 1. Naked Single
+  res=findNakedSingle(); if(res) return res;
+  // 2. Hidden Single
+  res=findHiddenSingle(); if(res) return res;
+  // 3. Naked Pair / Naked Triple
+  res=findNakedPairOrTriple(); if(res) return res;
+  // 4. Hidden Pair / Hidden Triple
+  res=findHiddenPairOrTriple(); if(res) return res;
+  // 5. Box-Line 排除(Pointing Pairs)
+  res=findBoxLineElimination(); if(res) return res;
+  // 6. X-Wing
+  res=findXWing(); if(res) return res;
+  // 7. XY-Wing
+  res=findXYWing(); if(res) return res;
+
+  res=findSwordfish(); if(res) return res;
+  res=findJellyfish(); if(res) return res;
+
+  return null; // 未找到
+}
+
+
+/**************************************************************
+ * 2.1 Naked Single
+ **************************************************************/
+function findNakedSingle(){
+  for(let r=0;r<9;r++){
+    for(let c=0;c<9;c++){
+      if(puzzleGrid[r][c]===0){
+        let cand=candidatesGrid[r][c];
+        if(cand.size===1){
+          let val=[...cand][0];
+          return {
+            technique: "Naked Single",
+            message: `第${r+1}行, 第${c+1}列 只有一个候选数 ${val}`,
+            cells:[{r,c}],
+            digit: val
+          };
         }
       }
     }
+  }
+  return null;
+}
 
-    // 点击数字按钮(或键盘输入)
-    function onNumberInput(num) {
-      if (!selectedCell) return;
-      if (selectedCell.dataset.fixed === 'true') return; // 固定格不可改
-
-      let r = parseInt(selectedCell.dataset.row);
-      let c = parseInt(selectedCell.dataset.col);
-
-      const mode = document.querySelector('input[name="mode"]:checked').value;
-      if (mode === 'pen') {
-        // 钢笔模式：写入明确数字
-        if (isValid(puzzleGrid, r, c, num)) {
-          puzzleGrid[r][c] = num;
-          selectedCell.innerHTML = num;
-          selectedCell.style.color = '#007bff'; // 写入的数字颜色
-
-          // 更新候选数 (只做删除，不做大范围重算)
-          updateCandidatesAfterFill(r, c, num);
-
-          // 检查是否完成
-          if (checkWin()) {
-            successInfo.textContent = '恭喜你，数独完成！';
-          }
-        } else {
-          // 答案错误
-          errorCount++;
-          errorInfo.textContent = `错误：填写错误次数 ${errorCount} / ${maxErrors}`;
-          if (errorCount >= maxErrors) {
-            gameOver();
-          }
-        }
-      } else {
-        // 铅笔模式：编辑候选数
-        if (candidatesGrid[r][c].has(num)) {
-          // 如果已存在，则移除
-          candidatesGrid[r][c].delete(num);
-        } else {
-          // 如果不存在，则添加
-          candidatesGrid[r][c].add(num);
-        }
-        // 重新渲染该格子的候选
-        if (puzzleGrid[r][c] === 0) {
-          if (candidatesGrid[r][c].size > 0) {
-            selectedCell.innerHTML = '<div class="candidate">' + [...candidatesGrid[r][c]].join(' ') + '</div>';
-          } else {
-            selectedCell.innerHTML = '';
-          }
+/**************************************************************
+ * 2.2 Hidden Single
+ **************************************************************/
+function findHiddenSingle(){
+  // 行
+  for(let r=0;r<9;r++){
+    let digitPositions={};
+    for(let d=1; d<=9; d++){
+      digitPositions[d]=[];
+    }
+    // 收集
+    for(let c=0;c<9;c++){
+      if(puzzleGrid[r][c]===0){
+        for(let d of candidatesGrid[r][c]){
+          digitPositions[d].push({r,c});
         }
       }
     }
-
-    // 当填入一个数字后，更新该行、列、宫其他格子的候选(只做删除)
-    function updateCandidatesAfterFill(r, c, val) {
-      // 更新同一行
-      for (let col = 0; col < 9; col++) {
-        candidatesGrid[r][col].delete(val);
-        renderCandidateToCell(r, col);
+    for(let d=1;d<=9;d++){
+      if(digitPositions[d].length===1){
+        let pos = digitPositions[d][0];
+        return {
+          technique: "Hidden Single",
+          message: `第${r+1}行只有一个格可放数字${d}`,
+          cells:[pos],
+          digit:d
+        };
       }
-      // 更新同一列
-      for (let row = 0; row < 9; row++) {
-        candidatesGrid[row][c].delete(val);
-        renderCandidateToCell(row, c);
-      }
-      // 更新所在宫
-      const boxRow = Math.floor(r / 3) * 3;
-      const boxCol = Math.floor(c / 3) * 3;
-      for (let rr = 0; rr < 3; rr++) {
-        for (let cc = 0; cc < 3; cc++) {
-          candidatesGrid[boxRow + rr][boxCol + cc].delete(val);
-          renderCandidateToCell(boxRow + rr, boxCol + cc);
+    }
+  }
+  // 列
+  for(let c=0;c<9;c++){
+    let digitPositions={};
+    for(let d=1; d<=9; d++){
+      digitPositions[d]=[];
+    }
+    for(let r=0;r<9;r++){
+      if(puzzleGrid[r][c]===0){
+        for(let d of candidatesGrid[r][c]){
+          digitPositions[d].push({r,c});
         }
       }
     }
-
-    // 将某格的候选数重新渲染到UI
-    function renderCandidateToCell(r, c) {
-      let td = sudokuBoard.rows[r].cells[c];
-      if (puzzleGrid[r][c] === 0 && candidatesGrid[r][c].size > 0) {
-        td.innerHTML = '<div class="candidate">' + [...candidatesGrid[r][c]].join(' ') + '</div>';
-      } else if (puzzleGrid[r][c] === 0) {
-        td.innerHTML = '';
+    for(let d=1;d<=9;d++){
+      if(digitPositions[d].length===1){
+        let pos=digitPositions[d][0];
+        return {
+          technique:"Hidden Single",
+          message:`第${c+1}列只有一个格可放数字${d}`,
+          cells:[pos],
+          digit:d
+        };
       }
     }
-
-    // 检查是否胜利
-    function checkWin() {
-      // 如果没有空格子 => 完成
-      for (let r = 0; r < 9; r++) {
-        for (let c = 0; c < 9; c++) {
-          if (puzzleGrid[r][c] === 0) {
-            return false;
-          }
-        }
-      }
-      return true;
-    }
-
-    // 游戏结束
-    function gameOver() {
-      errorInfo.textContent = '错误次数过多，游戏结束！';
-      // 禁止点击
-      let tds = sudokuBoard.getElementsByTagName('td');
-      for (let td of tds) {
-        td.removeEventListener('click', onCellClick);
-      }
-    }
-
-    // “开始游戏”按钮事件
-    startGameBtn.addEventListener('click', () => {
-      resetInfo();
-      createBoardCells();
-
-      // 从输入框中获取种子值
-      let seedValue = seedInput.value.trim();
-      if (!seedValue) {
-        // 如果用户没有输入，则自动生成一个种子(时间戳+随机数)
-        seedValue = Date.now() + "_" + Math.floor(Math.random() * 100000);
-        // 显示在输入框
-        seedInput.value = seedValue;
-      }
-      // 初始化 seedrandom
-      rng = new Math.seedrandom(seedValue);
-
-      // 获取难度
-      const difficulty = document.querySelector('input[name="difficulty"]:checked').value;
-      // 生成完整解
-      solutionGrid = generateSolution();
-      // 挖空得到题目
-      puzzleGrid = digHoles(solutionGrid, difficulty);
-
-      // 渲染到页面
-      renderPuzzle();
-      // 初始化候选数组并计算
-      initCandidates();
-      computeAllCandidates();
-    });
-
-    // “补全候选数”按钮事件
-    fillCandidatesBtn.addEventListener('click', () => {
-      computeAllCandidates();
-      renderCandidates();
-    });
-
-    // “提示”按钮事件（示例：唯一候选）
-    hintBtn.addEventListener('click', () => {
-      let foundHint = false;
-      let hintMsg = '';
-
-      for (let r = 0; r < 9; r++) {
-        for (let c = 0; c < 9; c++) { 
-          if (puzzleGrid[r][c] === 0) {
-            let set = candidatesGrid[r][c];
-            if (set.size === 1) {
-              let val = [...set][0];
-              foundHint = true;
-              hintMsg = `提示：第 ${r+1} 行, 第 ${c+1} 列 只有一个候选数 ${val}，可以填入。`;
-              break;
+  }
+  // 宫
+  for(let boxR=0;boxR<3;boxR++){
+    for(let boxC=0;boxC<3;boxC++){
+      let startR=boxR*3, startC=boxC*3;
+      let digitPositions={};
+      for(let d=1;d<=9;d++){ digitPositions[d]=[]; }
+      for(let rr=0; rr<3; rr++){
+        for(let cc=0; cc<3; cc++){
+          let r=startR+rr, c=startC+cc;
+          if(puzzleGrid[r][c]===0){
+            for(let d of candidatesGrid[r][c]){
+              digitPositions[d].push({r,c});
             }
           }
         }
-        if (foundHint) break;
       }
-
-      if (foundHint) {
-        alert(hintMsg);
-      } else {
-        alert('暂无“唯一候选”可直接填入。可尝试其他排除法或更高级技巧。');
+      for(let d=1; d<=9; d++){
+        if(digitPositions[d].length===1){
+          let pos=digitPositions[d][0];
+          return {
+            technique:"Hidden Single",
+            message:`在第${boxR+1}宫, 数字${d}只能放在(r${pos.r+1}, c${pos.c+1})`,
+            cells:[pos],
+            digit:d
+          };
+        }
       }
-    });
+    }
+  }
+  return null;
+}
 
-    // 监听数字按钮点击
-    document.querySelectorAll('.num-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        let num = parseInt(btn.dataset.num, 10);
-        onNumberInput(num);
-      });
-    });
 
-    // 监听键盘数字输入
-    document.addEventListener('keydown', (e) => {
-      if (!selectedCell) return;
-      if (e.key >= '1' && e.key <= '9') {
-        onNumberInput(parseInt(e.key,10));
+/**************************************************************
+ * 2.3 Naked Pair / Naked Triple
+ **************************************************************/
+function findNakedPairOrTriple(){
+  // 简化：只示范行内“Naked Pair/Triple”
+  // 列/宫类似逻辑
+  for(let r=0;r<9;r++){
+    // 收集空格 => candidates
+    let empties=[];
+    for(let c=0;c<9;c++){
+      if(puzzleGrid[r][c]===0){
+        empties.push({r,c, cands: candidatesGrid[r][c]});
       }
-    });
+    }
+    // 检测 Pair
+    for(let i=0;i<empties.length-1;i++){
+      for(let j=i+1;j<empties.length;j++){
+        let set1=empties[i].cands, set2=empties[j].cands;
+        // Naked Pair => 2个格的候选完全相同且size=2
+        if(set1.size===2 && areSetsEqual(set1,set2)){
+          // 其他格可排除这2个数字
+          let digits=[...set1];
+          return {
+            technique:"Naked Pair",
+            message:`第${r+1}行发现Naked Pair {${digits.join(',')}}`,
+            cells:[{r:empties[i].r,c:empties[i].c},{r:empties[j].r,c:empties[j].c}],
+            digits:digits
+          };
+        }
+      }
+    }
+    // 检测 Triple => size=3, 并恰好有3个格候选集合相同
+    // ...省略更多复杂逻辑
+  }
+  return null;
+}
 
-    // 页面加载后先创建空的9x9棋盘
-    createBoardCells();
-  </script>
+function areSetsEqual(s1, s2){
+  if(s1.size!==s2.size) return false;
+  for(let x of s1){
+    if(!s2.has(x)) return false;
+  }
+  return true;
+}
+
+/**************************************************************
+ * 2.4 Hidden Pair / Hidden Triple
+ **************************************************************/
+function findHiddenPairOrTriple(){
+  // 同理，只演示行内“Hidden Pair”
+  for(let r=0;r<9;r++){
+    // 统计某行内 (digit => 哪些格可放)
+    let digitPositions={};
+    for(let d=1;d<=9;d++){
+      digitPositions[d]=[];
+    }
+    let empties=[];
+    for(let c=0;c<9;c++){
+      if(puzzleGrid[r][c]===0){
+        empties.push({r,c});
+        for(let d of candidatesGrid[r][c]){
+          digitPositions[d].push({r,c});
+        }
+      }
+    }
+    // 找 hidden pair => 两个数字 只出现在同两个格
+    for(let d1=1; d1<=9; d1++){
+      for(let d2=d1+1; d2<=9; d2++){
+        let pos1=digitPositions[d1], pos2=digitPositions[d2];
+        if(pos1.length===2 && pos2.length===2 && samePositions(pos1,pos2)){
+          // 说明 d1/d2只能出现在这两个格子 => hidden pair
+          return {
+            technique:"Hidden Pair",
+            message:`第${r+1}行: 数字${d1}和${d2}只出现于同2格 => Hidden Pair`,
+            digits:[d1,d2],
+            cells: pos1
+          };
+        }
+      }
+    }
+  }
+  return null;
+}
+function samePositions(p1, p2){
+  if(p1.length!==p2.length) return false;
+  return p1.every((v,i)=> v.r===p2[i].r && v.c===p2[i].c);
+}
+
+/**************************************************************
+ * 2.5 Box-Line 排除 (Pointing Pairs)
+ **************************************************************/
+function findBoxLineElimination(){
+  // 类似之前的“Pointing Pairs”例子
+  // 这里仅简单示意
+  for(let boxR=0; boxR<3; boxR++){
+    for(let boxC=0; boxC<3; boxC++){
+      let startR=boxR*3, startC=boxC*3;
+      let digitPositions={};
+      for(let d=1;d<=9;d++){digitPositions[d]=[];}
+      // 收集
+      for(let rr=0; rr<3; rr++){
+        for(let cc=0; cc<3; cc++){
+          let r=startR+rr, c=startC+cc;
+          if(puzzleGrid[r][c]===0){
+            for(let d of candidatesGrid[r][c]){
+              digitPositions[d].push({r,c});
+            }
+          }
+        }
+      }
+      // 检测
+      for(let d=1; d<=9; d++){
+        let arr=digitPositions[d];
+        if(arr.length>0 && arr.length<=3){
+          let sameRow=arr.every(p=> p.r===arr[0].r);
+          let sameCol=arr.every(p=> p.c===arr[0].c);
+          if(sameRow){
+            let rowIdx=arr[0].r;
+            // ...
+            return {
+              technique:"Box-Line 排除",
+              message:`第${boxR+1}宫,数字${d}仅位于同一行 => 可在此行其他宫格排除${d}`,
+              digit:d,
+              cells:arr
+            };
+          }else if(sameCol){
+            let colIdx=arr[0].c;
+            // ...
+            return {
+              technique:"Box-Line 排除",
+              message:`第${boxC+1}宫,数字${d}仅位于同一列 => 可在此列其他宫格排除${d}`,
+              digit:d,
+              cells:arr
+            };
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**************************************************************
+ * 2.6 X-Wing
+ **************************************************************/
+function findXWing(){
+  // 仅示意“行式X-Wing”
+  // 对某数字 d, 找到两行, each行 d只可能出现在同2列
+  for(let d=1; d<=9; d++){
+    // 收集行内可能列
+    let rowPossibleCols=Array.from({length:9},()=>[]);
+    for(let r=0;r<9;r++){
+      for(let c=0;c<9;c++){
+        if(puzzleGrid[r][c]===0 && candidatesGrid[r][c].has(d)){
+          rowPossibleCols[r].push(c);
+        }
+      }
+    }
+    // 两行 => same 2 cols => X-Wing
+    let rows = [];
+    for(let r=0;r<9;r++){
+      if(rowPossibleCols[r].length===2) rows.push(r);
+    }
+    // 任意两行 => colset相同
+    for(let i=0;i<rows.length-1;i++){
+      for(let j=i+1;j<rows.length;j++){
+        let r1=rows[i], r2=rows[j];
+        let colset1=rowPossibleCols[r1], colset2=rowPossibleCols[r2];
+        if(colset1.length===2 && colset2.length===2 && sameArray(colset1,colset2)){
+          return {
+            technique:"X-Wing",
+            message:`数字${d}在行${r1+1}与行${r2+1}中只出现于同2列 => 构成X-Wing`,
+            digit:d,
+            lines:[r1,r2],
+            columns:colset1
+          };
+        }
+      }
+    }
+  }
+  return null;
+}
+function sameArray(a,b){ 
+  if(a.length!==b.length) return false;
+  return a.every((v,i)=>v===b[i]);
+}
+
+/**************************************************************
+ * 2.7 XY-Wing
+ **************************************************************/
+function findXYWing() {
+  // XY-Wing: A(\{x,y\}), B(\{x,z\}), C(\{y,z\})
+  let empties = [];
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      if (puzzleGrid[r][c] === 0) {
+        empties.push({ r, c, cands: [...candidatesGrid[r][c]] });
+      }
+    }
+  }
+  for (let i = 0; i < empties.length; i++) {
+    for (let j = 0; j < empties.length; j++) {
+      for (let k = 0; k < empties.length; k++) {
+        if (i !== j && j !== k && i !== k) {
+          let A = empties[i], B = empties[j], C = empties[k];
+          if (A.cands.length === 2 && B.cands.length === 2 && C.cands.length === 2) {
+            if (A.cands.has(C.cands[0]) && B.cands.has(C.cands[1])) {
+              return {
+                technique: "XY-Wing",
+                message: "XY-Wing 适用",
+                cells: [A, B, C],
+                digits: [A.cands[0], B.cands[1]]
+              };
+            }
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function findSwordfish() {
+  for (let d = 1; d <= 9; d++) {
+    // 检查数字 d 在行和列中出现的模式
+    let rowCols = Array.from({ length: 9 }, () => []); // 存储每行的候选列
+    for (let r = 0; r < 9; r++) {
+      for (let c = 0; c < 9; c++) {
+        if (puzzleGrid[r][c] === 0 && candidatesGrid[r][c].has(d)) {
+          rowCols[r].push(c);
+        }
+      }
+    }
+
+    // 检查是否有三行，且每行候选列交点构成矩阵
+    for (let i = 0; i < 9; i++) {
+      for (let j = i + 1; j < 9; j++) {
+        for (let k = j + 1; k < 9; k++) {
+          let commonCols = intersection(rowCols[i], rowCols[j], rowCols[k]);
+          if (commonCols.length === 2) {
+            return {
+              technique: "Swordfish",
+              message: `在行${i+1}, ${j+1}, ${k+1}中，数字${d}只能出现在这两列: ${commonCols.join(', ')}，可以排除该数字在其他行/列中的候选。`,
+              digit: d,
+              rows: [i, j, k],
+              columns: commonCols
+            };
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
+// 用于查找交集的辅助函数
+function intersection(arr1, arr2, arr3) {
+  return arr1.filter(value => arr2.includes(value) && arr3.includes(value));
+}
+
+function findJellyfish() {
+  for (let d = 1; d <= 9; d++) {
+    let rowCols = Array.from({ length: 9 }, () => []);
+    for (let r = 0; r < 9; r++) {
+      for (let c = 0; c < 9; c++) {
+        if (puzzleGrid[r][c] === 0 && candidatesGrid[r][c].has(d)) {
+          rowCols[r].push(c);
+        }
+      }
+    }
+
+    for (let i = 0; i < 9; i++) {
+      for (let j = i + 1; j < 9; j++) {
+        for (let k = j + 1; k < 9; k++) {
+          for (let l = k + 1; l < 9; l++) {
+            let commonCols = intersection(rowCols[i], rowCols[j], rowCols[k], rowCols[l]);
+            if (commonCols.length === 3) {
+              return {
+                technique: "Jellyfish",
+                message: `在行${i+1}, ${j+1}, ${k+1}, ${l+1}中，数字${d}只能出现在这三列: ${commonCols.join(', ')}，可以排除该数字在其他行/列中的候选。`,
+                digit: d,
+                rows: [i, j, k, l],
+                columns: commonCols
+              };
+            }
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
+
+
+/**************************************************************
+ * 3. UI: 显示提示(高亮相关格)
+ **************************************************************/
+function showHint(hint){
+  let msgBox=document.getElementById('hint-msg');
+  if(!hint){
+    msgBox.textContent="暂无可用技巧，需更高级思路或已无解。";
+    return;
+  }
+  // 显示
+  msgBox.textContent=`[${hint.technique}] ${hint.message}`;
+  highlightCells(hint.cells || []);
+}
+document.getElementById('fill-candidates').addEventListener('click', ()=>{
+  computeAllCandidates(); // 全量计算
+  renderCandidates();     // 显示
+});
+/** 数字按钮 => onNumberInput */
+document.querySelectorAll('.num-btn').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    if(!selectedCell) return; // 没有选中格子时，什么都不做(也可自行改成点亮逻辑)
+    let num=parseInt(btn.dataset.num,10);
+    onNumberInput(num);
+  });
+});
+document.getElementById('btn-hint').addEventListener('click',()=>{
+  let hint=getHint();
+  showHint(hint);
+});
+/** 键盘 1~9 => onNumberInput */
+document.addEventListener('keydown',(e)=>{
+  if(e.key>='1' && e.key<='9'){
+    if(!selectedCell) return; // 同上
+    onNumberInput(parseInt(e.key,10));
+  }
+});
+
+/** 页面初始化：先创建空表 */
+createBoardCells();
+</script>
 </body>
 </html>
