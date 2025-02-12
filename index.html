@@ -26,9 +26,8 @@
       flex-direction: column;
       min-height: 100vh;
       margin: 0;
-      position: fixed; /* 防止iOS橡皮筋效果 */
       width: 100%;
-      height: 100%;
+      overflow-x: hidden; /* 防止水平滚动 */
     }
     header {
       text-align: center; padding: 15px; background: linear-gradient(to bottom, #2a2a2a, var(--card-bg));
@@ -38,8 +37,11 @@
     .game-container {
       display: flex;
       flex-direction: column;
-      height: 100%;
+      flex: 1;
       padding: 10px;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      gap: 10px; /* 统一控制各区块间距 */
     }
     .top-controls {
       padding: 10px;
@@ -83,7 +85,9 @@
       border-radius: 8px;
       padding: 8px;
       margin: 10px auto;
-      max-width: 800px; /* 与棋盘同宽 */
+      max-width: 800px;
+      position: relative;
+      z-index: 1;
     }
     .input-controls {
       max-width: 600px; /* 控制数字键盘宽度 */
@@ -203,13 +207,19 @@
     }
     @media (max-width: 768px) {
       .game-container {
-        gap: 10px;
+        gap: 10px; /* 移动端减小间距 */
       }
-      .controls {
-        grid-template-columns: 1fr;
+      .top-controls {
+        padding: 0; /* 移除顶部内边距 */
+      }
+      .board-area {
+        padding: 5px 0; /* 减小棋盘区域上下内边距 */
+      }
+      .bottom-controls {
+        margin: 5px auto; /* 减小底部控制区域外边距 */
       }
       .control-block {
-        padding: 10px;
+        padding: 10px; /* 减小控制块内边距 */
       }
       .number-input {
         grid-template-columns: repeat(3, 1fr);
